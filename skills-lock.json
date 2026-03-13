@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "deploy-to-edgeone": {
+      "source": "xiaban-x/deploy-to-edgeone-pages",
+      "sourceType": "github",
+      "computedHash": "b5c3c8e8a358b082dba0df35ba91ad97179ac677cfb4be4f6762a13202155a5d"
+    }
+  }
+}
