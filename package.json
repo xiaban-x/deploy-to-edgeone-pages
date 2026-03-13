@@ -1,0 +1,17 @@
+{
+  "name": "edgeone-pages-skills",
+  "version": "1.0.0",
+  "description": "Agent skills for deploying applications to EdgeOne Pages",
+  "keywords": [
+    "edgeone",
+    "edgeone-pages",
+    "deploy",
+    "agent-skills",
+    "ai-coding"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xiaban-x/deploy-to-edgeone-pages"
+  }
+}

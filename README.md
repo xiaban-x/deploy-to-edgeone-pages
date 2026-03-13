@@ -16,16 +16,16 @@ Deploy applications and websites to EdgeOne Pages. Supports automatic framework 
 
 ```bash
 # Install this skill to your AI agent
-npx skills add <your-github-username>/edgeone-pages-skills
+npx skills add xiaban-x/deploy-to-edgeone-pages
 
 # Install only the deploy skill
-npx skills add <your-github-username>/edgeone-pages-skills --skill deploy-to-edgeone
+npx skills add xiaban-x/deploy-to-edgeone-pages --skill deploy-to-edgeone
 
 # Install to a specific agent (e.g., claude-code, cursor)
-npx skills add <your-github-username>/edgeone-pages-skills -a claude-code
+npx skills add xiaban-x/deploy-to-edgeone-pages -a claude-code
 
 # Install globally (available across all projects)
-npx skills add <your-github-username>/edgeone-pages-skills -g
+npx skills add xiaban-x/deploy-to-edgeone-pages -g
 ```
 
 ### Manual Installation
@@ -37,7 +37,7 @@ git clone https://github.com/<your-github-username>/edgeone-pages-skills.git
 
 2. Install locally:
 ```bash
-npx skills add ./edgeone-pages-skills
+npx skills add ./deploy-to-edgeone-pages
 ```
 
 ## Usage
@@ -87,4 +87,3 @@ The agent will:
 ## License
 
 MIT
-# deploy-to-edgeone-pages
