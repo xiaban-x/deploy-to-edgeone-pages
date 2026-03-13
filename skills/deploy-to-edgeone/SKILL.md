@@ -80,7 +80,9 @@ EdgeOne CLI is installed but not authenticated. You have two options:
    Run `edgeone login` — a browser window will open for authentication.
 
 2. **API Token** (recommended for CI/CD or if browser login is not available):
-   - Go to EdgeOne Pages console to generate an API Token
+   - Generate an API Token from the EdgeOne Pages console:
+     - China site: https://console.cloud.tencent.com/edgeone/pages?tab=settings
+     - Global site: https://console.tencentcloud.com/edgeone/pages?tab=settings
    - Then deploy with: `edgeone pages deploy -n <project-name> -t <your-api-token>`
 
 Which method would you prefer?
@@ -144,74 +146,67 @@ edgeone pages deploy [path] -n <project-name> -t <api-token> -e preview
 
 ```
 To get an API Token:
-1. Go to EdgeOne Pages console (https://console.cloud.tencent.com/edgeone/pages)
-2. Navigate to your account settings
-3. Generate a new API Token
-4. Use it with the -t flag for deployment
+1. Go to the EdgeOne Pages console settings:
+   - China site: https://console.cloud.tencent.com/edgeone/pages?tab=settings
+   - Global site: https://console.tencentcloud.com/edgeone/pages?tab=settings
+2. Generate a new API Token
+3. Use it with the -t flag for deployment
 ```
 
 ---
 
-## Step 3: Build Before Deploy (IMPORTANT — always prefer local build)
+## Step 3: Deploy (with automatic fallback to local build)
 
-**⚠️ CRITICAL: Always try to build locally first, then deploy the build output directory.** EdgeOne Pages remote build may encounter network timeout issues (e.g., `ConnectTimeoutError` when fetching dependencies). Local build avoids this entirely.
+The correct deployment flow is: **try direct deploy first** → if it fails (timeout/network error) → **build locally with `edgeone pages build`** → **deploy the `.edgeone` output**.
 
-### Recommended flow:
+### 3.1 First attempt: Direct deploy
 
-1. **Check if build output already exists:**
-
-```bash
-ls -d dist build out .next .output 2>/dev/null
-```
-
-2. **If no build output, build locally:**
-
-```bash
-npm install
-npm run build
-```
-
-3. **Deploy the build output directory (NOT the project root):**
-
-```bash
-# For Vite / Vue CLI / Rollup projects:
-edgeone pages deploy ./dist -n <project-name> -e preview
-
-# For Create React App:
-edgeone pages deploy ./build -n <project-name> -e preview
-
-# For Next.js:
-edgeone pages deploy .next -n <project-name> -e preview
-
-# For Next.js static export:
-edgeone pages deploy ./out -n <project-name> -e preview
-
-# For Nuxt 3:
-edgeone pages deploy .output -n <project-name> -e preview
-```
-
-4. **Common build output directories:**
-   - `dist/` — Vite, Vue CLI, Rollup
-   - `build/` — Create React App
-   - `out/` — Next.js static export
-   - `.next/` — Next.js
-   - `.output/` — Nuxt 3
-   - `public/` — Some static site generators
-
-5. **Only use auto-build as fallback** (when local build is not possible):
+Always try `edgeone pages deploy` first. The CLI will attempt to build remotely and deploy:
 
 ```bash
 edgeone pages deploy -n <project-name> -e preview
 ```
 
-Without specifying a path, the CLI will attempt to build remotely and deploy — but this may fail due to network timeouts.
+If this succeeds, you're done! Show the deployment result.
 
-### Why local build first?
+### 3.2 If deploy fails (timeout / network error): Build locally, then deploy
 
-The EdgeOne Pages remote build environment may have network connectivity issues when installing dependencies (e.g., `mirrors.tencent.com` timeout). Building locally ensures:
-- Dependencies are resolved using your local network
-- Build errors are caught immediately
-- Only the final build artifacts are uploaded, which is faster
+If the first deploy fails with timeout or network errors (e.g., `ConnectTimeoutError`, `fetch failed`, `timeout`), use the EdgeOne CLI's local build command:
+
+**Step 1: Build locally using `edgeone pages build`:**
+
+```bash
+edgeone pages build
+```
+
+This will build the project locally and output the result to the `.edgeone` directory.
+
+**Step 2: Deploy the `.edgeone` build output:**
+
+```bash
+edgeone pages deploy .edgeone -n <project-name> -e preview
+```
+
+### 3.3 Complete fallback flow example:
+
+```bash
+# Step 1: Try direct deploy
+edgeone pages deploy -n my-project -e preview
+
+# If it fails with timeout...
+
+# Step 2: Build locally
+edgeone pages build
+
+# Step 3: Deploy the local build output
+edgeone pages deploy .edgeone -n my-project -e preview
+```
+
+### Why this flow?
+
+- **Direct deploy** is the simplest and fastest path — let the remote build handle everything
+- **`edgeone pages build`** is the official local build command that knows how to handle all frameworks correctly and outputs to `.edgeone`
+- Only fall back to local build when remote build has issues (typically network timeouts like `mirrors.tencent.com` timeout)
 
 ---
 
@@ -234,22 +229,41 @@ This links the local project to the EdgeOne Pages project, enabling:
 
 Always show the user the deployment URL after a successful deploy.
 
+**⚠️ CRITICAL: Use the COMPLETE deployment URL from the CLI output.** The CLI outputs a URL with `eo_token` and `eo_time` query parameters — you MUST include the full URL with these parameters. Do NOT truncate or strip the query string.
+
+For example, if the CLI outputs:
+```
+EDGEONE_DEPLOY_URL=https://my-project-xbomg82u4g.edgeone.cool?eo_token=2ca5320eff8e081f205765860fd69a35&eo_time=1773428045
+```
+
+You must show the **full URL**: `https://my-project-xbomg82u4g.edgeone.cool?eo_token=2ca5320eff8e081f205765860fd69a35&eo_time=1773428045`
+
 **Example output format:**
 
 ```
 🎉 Deployment successful!
 
-| Item         | Details                                              |
-|--------------|------------------------------------------------------|
-| **Status**   | ✅ Ready                                              |
-| **URL**      | https://<project-name>.edgeone.app                   |
-| **Env**      | Preview / Production                                 |
-| **Project**  | <project-name>                                       |
+| Item            | Details                                                                 |
+|-----------------|-------------------------------------------------------------------------|
+| **Status**      | ✅ Ready                                                                |
+| **Preview URL** | https://<project>-<id>.edgeone.cool?eo_token=xxx&eo_time=xxx (full URL)|
+| **Env**         | Preview / Production                                                    |
+| **Project ID**  | pages-xxxxx                                                             |
+| **Console**     | https://console.cloud.tencent.com/edgeone/pages/project/<id>/deployment |
 
-You can visit the URL above to see your deployed site.
+⏰ **Note:** The preview URL above is valid for **3 hours only**. After it expires, you'll need to redeploy to generate a new preview link.
+
+💡 **Tip:** To get a permanent URL, go to your project settings in the EdgeOne Pages console and bind a **custom domain**:
+- China site: https://console.cloud.tencent.com/edgeone/pages
+- Global site: https://console.tencentcloud.com/edgeone/pages
 ```
 
-**Do not** curl or fetch the deployed URL to verify it works. Just return the link.
+**Important rules for the output:**
+1. **NEVER** truncate the `EDGEONE_DEPLOY_URL` — always include `?eo_token=...&eo_time=...`
+2. **ALWAYS** remind the user about the 3-hour expiration of preview URLs
+3. **ALWAYS** suggest binding a custom domain for a permanent URL
+4. Parse the CLI output for `EDGEONE_DEPLOY_URL`, `EDGEONE_PROJECT_ID`, and `EDGEONE_DEPLOY_TYPE` to populate the table
+5. **Do not** curl or fetch the deployed URL to verify it works. Just return the link.
 
 ---
 
@@ -293,7 +307,9 @@ Go to the EdgeOne Pages console to manage and delete projects:
 
 **Option 2: Delete via API (I can help)**
 Provide me with:
-1. Your API Token (generate one from the EdgeOne Pages console)
+1. Your API Token — you can create one here:
+   - China site: https://console.cloud.tencent.com/edgeone/pages?tab=settings
+   - Global site: https://console.tencentcloud.com/edgeone/pages?tab=settings
 2. The Project ID(s) you want to delete (format: pages-xxxxx)
 
 I'll call the API to delete them for you.
@@ -345,22 +361,21 @@ If deployment fails with errors like:
 - `fetch failed` during build
 - `mirrors.tencent.com:443 timeout`
 
-This means the remote build environment has network issues. **Always fall back to local build:**
+This means the remote build environment has network issues. **Fall back to local build using `edgeone pages build`:**
 
-1. Build locally:
+1. Build locally using EdgeOne CLI:
 ```bash
-npm install
-npm run build
+edgeone pages build
 ```
 
-2. Deploy the build output:
+2. Deploy the `.edgeone` build output:
 ```bash
-edgeone pages deploy ./dist -n <project-name> -e preview
+edgeone pages deploy .edgeone -n <project-name> -e preview
 ```
 
 **Tell the user:**
 ```
-The remote build encountered a network timeout. I've built the project locally instead and will deploy the build output directly. This is more reliable.
+The remote build encountered a network timeout. I'll build the project locally using `edgeone pages build` and then deploy the local build output. This is more reliable.
 ```
 
 ---
@@ -383,7 +398,9 @@ If `edgeone login` fails or times out:
 
 ```
 Browser login failed. You can use an API Token instead:
-1. Go to EdgeOne Pages console to generate an API Token
+1. Generate an API Token from the EdgeOne Pages console:
+   - China site: https://console.cloud.tencent.com/edgeone/pages?tab=settings
+   - Global site: https://console.tencentcloud.com/edgeone/pages?tab=settings
 2. Deploy with: edgeone pages deploy -n <project-name> -t <your-api-token>
 ```
 
@@ -391,14 +408,23 @@ Browser login failed. You can use an API Token instead:
 
 If the build fails during deployment:
 
-1. Try building locally first to see the error:
+1. Try building locally using EdgeOne CLI:
+```bash
+edgeone pages build
+```
+
+2. If EdgeOne build fails, try the standard build:
 ```bash
 npm run build
 ```
 
-2. If the build succeeds locally, deploy the build output directly:
+3. Then deploy the build output:
 ```bash
-edgeone pages deploy ./dist -e preview
+# If edgeone pages build succeeded:
+edgeone pages deploy .edgeone -n <project-name> -e preview
+
+# If npm run build succeeded (use the framework's output dir):
+edgeone pages deploy ./dist -n <project-name> -e preview
 ```
 
 ### Account Switching
@@ -434,6 +460,8 @@ edgeone pages deploy [path] -n <project-name> -t <api-token> -e preview
 | `edgeone whoami`                     | Check current authentication       |
 | `edgeone pages deploy`               | Deploy (production, auto-build)    |
 | `edgeone pages deploy -e preview`    | Deploy as preview                  |
+| `edgeone pages deploy .edgeone`      | Deploy local build output          |
+| `edgeone pages build`                | Build project locally              |
 | `edgeone pages deploy ./dist`        | Deploy specific directory          |
 | `edgeone pages deploy -n name`       | Deploy to specific project         |
 | `edgeone pages deploy -t <token>`    | Deploy with API Token              |

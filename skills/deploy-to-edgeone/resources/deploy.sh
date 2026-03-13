@@ -3,11 +3,13 @@
 # This script handles deployment to EdgeOne Pages with automatic
 # framework detection, building, and deployment.
 #
-# Usage:
-#   bash deploy.sh [path] [options]
+# Deploy flow:
+#   1. edgeone pages deploy (remote build + deploy)
+#   2. If fails (timeout/network) → edgeone pages build (local build)
+#   3. Then → edgeone pages deploy .edgeone (deploy local build output)
 #
-# Arguments:
-#   path          - Directory or ZIP to deploy (defaults to current directory)
+# Usage:
+#   bash deploy.sh [options]
 #
 # Options:
 #   -n, --name    - Project name
@@ -18,7 +20,6 @@
 #
 # Examples:
 #   bash deploy.sh
-#   bash deploy.sh ./dist
 #   bash deploy.sh -n my-project -e preview
 #   bash deploy.sh -n my-project -t $EDGEONE_API_TOKEN
 #   bash deploy.sh --delete --project-id pages-xxxxx -t $EDGEONE_API_TOKEN
@@ -34,7 +35,6 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Default values
-DEPLOY_PATH=""
 PROJECT_NAME=""
 API_TOKEN=""
 DEPLOY_ENV="preview"
@@ -65,10 +65,7 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         -h|--help)
-            echo "Usage: bash deploy.sh [path] [options]"
-            echo ""
-            echo "Arguments:"
-            echo "  path                  Directory or ZIP to deploy (defaults to .)"
+            echo "Usage: bash deploy.sh [options]"
             echo ""
             echo "Options:"
             echo "  -n, --name NAME       Project name"
@@ -78,15 +75,17 @@ while [[ $# -gt 0 ]]; do
             echo "  --project-id ID       Project ID to delete (format: pages-xxxxx)"
             echo "  -h, --help            Show this help message"
             echo ""
+            echo "Deploy flow:"
+            echo "  1. Try: edgeone pages deploy (remote build)"
+            echo "  2. If timeout: edgeone pages build (local build)"
+            echo "  3. Then: edgeone pages deploy .edgeone"
+            echo ""
             echo "Examples:"
-            echo "  bash deploy.sh ./dist -n my-project -e preview"
+            echo "  bash deploy.sh -n my-project -e preview"
             echo "  bash deploy.sh --delete --project-id pages-xxxxx -t YOUR_TOKEN"
             exit 0
             ;;
         *)
-            if [[ -z "$DEPLOY_PATH" ]]; then
-                DEPLOY_PATH="$1"
-            fi
             shift
             ;;
     esac
@@ -120,6 +119,10 @@ delete_project() {
     if [[ -z "$API_TOKEN" ]]; then
         log_error "API Token is required for project deletion."
         echo "  Usage: bash deploy.sh --delete --project-id pages-xxxxx -t YOUR_TOKEN"
+        echo ""
+        echo "  Get your API Token here:"
+        echo "  - China site: https://console.cloud.tencent.com/edgeone/pages?tab=settings"
+        echo "  - Global site: https://console.tencentcloud.com/edgeone/pages?tab=settings"
         exit 1
     fi
 
@@ -211,6 +214,9 @@ check_auth() {
         echo "  You have two options:"
         echo "  1. Run 'edgeone login' to authenticate via browser"
         echo "  2. Provide an API Token with -t flag"
+        echo "     Get your API Token here:"
+        echo "     - China site: https://console.cloud.tencent.com/edgeone/pages?tab=settings"
+        echo "     - Global site: https://console.tencentcloud.com/edgeone/pages?tab=settings"
         echo ""
 
         # Try browser login
@@ -222,9 +228,10 @@ check_auth() {
             log_error "Browser login failed."
             echo ""
             echo "  Please provide an API Token:"
-            echo "  1. Go to EdgeOne Pages console"
-            echo "  2. Generate an API Token"
-            echo "  3. Re-run: bash deploy.sh -t <your-token>"
+            echo "  1. Get your API Token here:"
+            echo "     - China site: https://console.cloud.tencent.com/edgeone/pages?tab=settings"
+            echo "     - Global site: https://console.tencentcloud.com/edgeone/pages?tab=settings"
+            echo "  2. Re-run: bash deploy.sh -t <your-token>"
             exit 1
         fi
     fi
@@ -235,27 +242,9 @@ check_auth() {
 # ============================================================
 detect_project_name() {
     if [[ -z "$PROJECT_NAME" ]]; then
-        local project_dir="${DEPLOY_PATH:-.}"
-
-        # If deploy path is a build output dir, look in parent
-        local basename
-        basename=$(basename "$project_dir")
-        if [[ "$basename" == "dist" || "$basename" == "build" || "$basename" == "out" || "$basename" == ".next" || "$basename" == ".output" ]]; then
-            local parent_dir
-            parent_dir=$(dirname "$project_dir")
-            if [[ -f "$parent_dir/package.json" ]]; then
-                PROJECT_NAME=$(grep -o '"name": *"[^"]*"' "$parent_dir/package.json" 2>/dev/null | head -1 | sed 's/"name": *"//;s/"//')
-            fi
-        fi
-
         # Try current directory package.json
-        if [[ -z "$PROJECT_NAME" ]] && [[ -f "package.json" ]]; then
+        if [[ -f "package.json" ]]; then
             PROJECT_NAME=$(grep -o '"name": *"[^"]*"' "package.json" 2>/dev/null | head -1 | sed 's/"name": *"//;s/"//')
-        fi
-
-        # Try deploy path package.json
-        if [[ -z "$PROJECT_NAME" ]] && [[ -f "$project_dir/package.json" ]]; then
-            PROJECT_NAME=$(grep -o '"name": *"[^"]*"' "$project_dir/package.json" 2>/dev/null | head -1 | sed 's/"name": *"//;s/"//')
         fi
 
         # Fallback to directory name
@@ -271,95 +260,14 @@ detect_project_name() {
 }
 
 # ============================================================
-# Detect framework and build locally (ALWAYS prefer local build)
-# ============================================================
-detect_and_build() {
-    log_step "Checking build output..."
-
-    local project_dir="."
-
-    # If deploy path is explicitly a build output or ZIP, use it directly
-    if [[ -n "$DEPLOY_PATH" ]]; then
-        if [[ "$DEPLOY_PATH" == *.zip ]]; then
-            log_info "Deploy path is a ZIP file: $DEPLOY_PATH"
-            return 0
-        fi
-
-        local basename
-        basename=$(basename "$DEPLOY_PATH")
-        if [[ "$basename" == "dist" || "$basename" == "build" || "$basename" == "out" || "$basename" == ".next" || "$basename" == ".output" ]]; then
-            if [[ -d "$DEPLOY_PATH" ]]; then
-                log_info "Deploy path is a build output directory: $DEPLOY_PATH"
-                return 0
-            fi
-        fi
-
-        # If deploy path is a project directory (has package.json), use it as project_dir
-        if [[ -f "$DEPLOY_PATH/package.json" ]]; then
-            project_dir="$DEPLOY_PATH"
-        fi
-    fi
-
-    # Check for existing build output
-    for dir in dist build out .next .output; do
-        if [[ -d "$project_dir/$dir" ]]; then
-            log_info "Found existing build output: $project_dir/$dir"
-            DEPLOY_PATH="$project_dir/$dir"
-            return 0
-        fi
-    done
-
-    # No build output — try to build locally
-    if [[ -f "$project_dir/package.json" ]]; then
-        local has_build
-        has_build=$(grep -c '"build"' "$project_dir/package.json" 2>/dev/null || echo "0")
-
-        if [[ "$has_build" -gt 0 ]]; then
-            log_warn "No build output found. Building locally first (recommended over remote build)..."
-
-            # Install dependencies if needed
-            if [[ ! -d "$project_dir/node_modules" ]]; then
-                log_info "Installing dependencies..."
-                (cd "$project_dir" && npm install)
-            fi
-
-            # Run build
-            log_step "Running local build..."
-            (cd "$project_dir" && npm run build)
-
-            # Find build output
-            for dir in dist build out .next .output; do
-                if [[ -d "$project_dir/$dir" ]]; then
-                    DEPLOY_PATH="$project_dir/$dir"
-                    log_success "Local build completed: $DEPLOY_PATH"
-                    return 0
-                fi
-            done
-
-            log_warn "Build completed but no standard output directory found. Will let EdgeOne CLI auto-detect."
-        fi
-    fi
-
-    # Fallback — use project root or deploy path as-is
-    if [[ -z "$DEPLOY_PATH" ]]; then
-        DEPLOY_PATH="."
-    fi
-    log_info "Will deploy: $DEPLOY_PATH"
-}
-
-# ============================================================
-# Deploy with error handling
+# Deploy with fallback: deploy → build → deploy .edgeone
 # ============================================================
 deploy() {
     log_step "Deploying to EdgeOne Pages..."
     echo ""
 
-    # Build the command
+    # Build the deploy command (no path = remote build)
     local cmd="edgeone pages deploy"
-
-    if [[ -n "$DEPLOY_PATH" ]]; then
-        cmd="$cmd $DEPLOY_PATH"
-    fi
 
     if [[ -n "$PROJECT_NAME" ]]; then
         cmd="$cmd -n $PROJECT_NAME"
@@ -376,7 +284,7 @@ deploy() {
     log_info "Running: $cmd"
     echo ""
 
-    # Execute deployment and capture output
+    # Step 1: Try direct deploy (remote build)
     local output
     local exit_code
     set +e
@@ -388,7 +296,7 @@ deploy() {
 
     if [[ $exit_code -eq 0 ]]; then
         echo ""
-        log_success "Deployment successful! 🎉"
+        handle_success "$output"
         return 0
     fi
 
@@ -408,60 +316,67 @@ deploy() {
         echo "  👉 https://edgeone.ai/pages"
         echo ""
         echo "  ${CYAN}Option 2: Delete via API${NC}"
-        echo "  Use this script to delete a project:"
-        echo "  bash deploy.sh --delete --project-id pages-xxxxx -t YOUR_API_TOKEN"
+        echo "  Provide your API Token and Project ID, and I can delete them for you."
+        echo "  Get your API Token here:"
+        echo "  - China site: https://console.cloud.tencent.com/edgeone/pages?tab=settings"
+        echo "  - Global site: https://console.tencentcloud.com/edgeone/pages?tab=settings"
         echo ""
-        echo "  To get an API Token, go to the EdgeOne Pages console settings."
+        echo "  Then run:"
+        echo "  bash deploy.sh --delete --project-id pages-xxxxx -t YOUR_API_TOKEN"
         echo ""
         exit 1
     fi
 
-    # Check for build timeout / network errors
+    # Check for build timeout / network errors → fallback to local build
     if echo "$output" | grep -qi "ConnectTimeoutError\|fetch failed\|timeout\|ETIMEDOUT\|ECONNREFUSED"; then
         echo ""
-        log_error "Remote build failed due to network timeout."
-        echo ""
-        echo "  The remote build environment couldn't fetch dependencies."
-        echo "  Trying local build instead..."
+        log_warn "Remote build failed due to network timeout. Falling back to local build..."
         echo ""
 
-        # Attempt local build and redeploy
-        local project_dir="."
-        if [[ -f "$project_dir/package.json" ]]; then
-            log_step "Building locally..."
-            (cd "$project_dir" && npm install && npm run build)
+        # Step 2: Build locally using edgeone pages build
+        log_step "Running: edgeone pages build"
+        set +e
+        local build_output
+        build_output=$(edgeone pages build 2>&1)
+        local build_exit=$?
+        set -e
 
-            # Find build output
-            for dir in dist build out .next .output; do
-                if [[ -d "$project_dir/$dir" ]]; then
-                    DEPLOY_PATH="$project_dir/$dir"
-                    log_success "Local build completed: $DEPLOY_PATH"
-                    echo ""
-                    log_step "Retrying deploy with local build output..."
+        echo "$build_output"
 
-                    local retry_cmd="edgeone pages deploy $DEPLOY_PATH"
-                    [[ -n "$PROJECT_NAME" ]] && retry_cmd="$retry_cmd -n $PROJECT_NAME"
-                    [[ -n "$API_TOKEN" ]] && retry_cmd="$retry_cmd -t $API_TOKEN"
-                    [[ "$DEPLOY_ENV" == "preview" ]] && retry_cmd="$retry_cmd -e preview"
-
-                    log_info "Running: $retry_cmd"
-                    eval "$retry_cmd"
-                    local retry_exit=$?
-
-                    if [[ $retry_exit -eq 0 ]]; then
-                        echo ""
-                        log_success "Deployment successful (with local build)! 🎉"
-                        return 0
-                    else
-                        log_error "Retry also failed with exit code $retry_exit"
-                        exit $retry_exit
-                    fi
-                fi
-            done
+        if [[ $build_exit -ne 0 ]]; then
+            log_error "Local build also failed."
+            echo "  Please check the build errors above and fix them."
+            exit $build_exit
         fi
 
-        log_error "Could not build locally. Please build manually and deploy the output directory."
-        exit 1
+        log_success "Local build completed!"
+        echo ""
+
+        # Step 3: Deploy the .edgeone build output
+        local retry_cmd="edgeone pages deploy .edgeone"
+        [[ -n "$PROJECT_NAME" ]] && retry_cmd="$retry_cmd -n $PROJECT_NAME"
+        [[ -n "$API_TOKEN" ]] && retry_cmd="$retry_cmd -t $API_TOKEN"
+        [[ "$DEPLOY_ENV" == "preview" ]] && retry_cmd="$retry_cmd -e preview"
+
+        log_step "Running: $retry_cmd"
+        echo ""
+
+        set +e
+        local retry_output
+        retry_output=$(eval "$retry_cmd" 2>&1)
+        local retry_exit=$?
+        set -e
+
+        echo "$retry_output"
+
+        if [[ $retry_exit -eq 0 ]]; then
+            echo ""
+            handle_success "$retry_output"
+            return 0
+        else
+            log_error "Deployment of local build output also failed (exit code: $retry_exit)."
+            exit $retry_exit
+        fi
     fi
 
     # Generic failure
@@ -469,11 +384,51 @@ deploy() {
     log_error "Deployment failed with exit code $exit_code"
     echo ""
     echo "  Troubleshooting:"
-    echo "  - Check if the build output directory exists"
     echo "  - Verify your authentication: edgeone whoami"
-    echo "  - Try building locally first: npm run build"
-    echo "  - Then deploy: edgeone pages deploy ./dist -n $PROJECT_NAME -e preview"
+    echo "  - Try local build: edgeone pages build"
+    echo "  - Then deploy: edgeone pages deploy .edgeone -n $PROJECT_NAME -e preview"
     exit $exit_code
+}
+
+# ============================================================
+# Handle successful deployment — parse and display results
+# ============================================================
+handle_success() {
+    local output="$1"
+
+    # Parse deployment info from CLI output
+    local deploy_url
+    local project_id
+    local deploy_type
+
+    deploy_url=$(echo "$output" | grep -o 'EDGEONE_DEPLOY_URL=[^ ]*' | head -1 | sed 's/EDGEONE_DEPLOY_URL=//')
+    project_id=$(echo "$output" | grep -o 'EDGEONE_PROJECT_ID=[^ ]*' | head -1 | sed 's/EDGEONE_PROJECT_ID=//')
+    deploy_type=$(echo "$output" | grep -o 'EDGEONE_DEPLOY_TYPE=[^ ]*' | head -1 | sed 's/EDGEONE_DEPLOY_TYPE=//')
+
+    log_success "Deployment successful! 🎉"
+    echo ""
+
+    if [[ -n "$deploy_url" ]]; then
+        echo "  📎 Preview URL (full, with token):"
+        echo "  ${GREEN}${deploy_url}${NC}"
+        echo ""
+    fi
+
+    if [[ -n "$project_id" ]]; then
+        echo "  📋 Project ID: $project_id"
+    fi
+
+    if [[ -n "$deploy_type" ]]; then
+        echo "  📦 Deploy Type: $deploy_type"
+    fi
+
+    echo ""
+    echo "  ⏰ Note: The preview URL above is valid for 3 hours only."
+    echo "     After it expires, you'll need to redeploy to generate a new preview link."
+    echo ""
+    echo "  💡 Tip: To get a permanent URL, bind a custom domain in the EdgeOne Pages console:"
+    echo "     - China site: https://console.cloud.tencent.com/edgeone/pages"
+    echo "     - Global site: https://console.tencentcloud.com/edgeone/pages"
 }
 
 # ============================================================
@@ -496,7 +451,6 @@ main() {
     check_cli
     check_auth
     detect_project_name
-    detect_and_build
     deploy
 }
 
