@@ -152,18 +152,45 @@ To get an API Token:
 
 ---
 
-## Step 3: Build Before Deploy (if needed)
+## Step 3: Build Before Deploy (IMPORTANT — always prefer local build)
 
-Before deploying, check if the project needs to be built first:
+**⚠️ CRITICAL: Always try to build locally first, then deploy the build output directory.** EdgeOne Pages remote build may encounter network timeout issues (e.g., `ConnectTimeoutError` when fetching dependencies). Local build avoids this entirely.
 
-1. **If `package.json` has a build script and no build output exists:**
+### Recommended flow:
+
+1. **Check if build output already exists:**
+
+```bash
+ls -d dist build out .next .output 2>/dev/null
+```
+
+2. **If no build output, build locally:**
 
 ```bash
 npm install
 npm run build
 ```
 
-2. **Common build output directories** (deploy the correct one):
+3. **Deploy the build output directory (NOT the project root):**
+
+```bash
+# For Vite / Vue CLI / Rollup projects:
+edgeone pages deploy ./dist -n <project-name> -e preview
+
+# For Create React App:
+edgeone pages deploy ./build -n <project-name> -e preview
+
+# For Next.js:
+edgeone pages deploy .next -n <project-name> -e preview
+
+# For Next.js static export:
+edgeone pages deploy ./out -n <project-name> -e preview
+
+# For Nuxt 3:
+edgeone pages deploy .output -n <project-name> -e preview
+```
+
+4. **Common build output directories:**
    - `dist/` — Vite, Vue CLI, Rollup
    - `build/` — Create React App
    - `out/` — Next.js static export
@@ -171,13 +198,20 @@ npm run build
    - `.output/` — Nuxt 3
    - `public/` — Some static site generators
 
-3. **If unsure, let EdgeOne auto-detect:**
+5. **Only use auto-build as fallback** (when local build is not possible):
 
 ```bash
-edgeone pages deploy
+edgeone pages deploy -n <project-name> -e preview
 ```
 
-Without specifying a path, the CLI will attempt to build and deploy automatically.
+Without specifying a path, the CLI will attempt to build remotely and deploy — but this may fail due to network timeouts.
+
+### Why local build first?
+
+The EdgeOne Pages remote build environment may have network connectivity issues when installing dependencies (e.g., `mirrors.tencent.com` timeout). Building locally ensures:
+- Dependencies are resolved using your local network
+- Build errors are caught immediately
+- Only the final build artifacts are uploaded, which is faster
 
 ---
 
@@ -240,6 +274,96 @@ edgeone pages env rm <KEY>
 ---
 
 ## Troubleshooting
+
+### Project Limit Exceeded (Pages project exceeds 40 limit) — IMPORTANT
+
+If deployment fails with error `Pages project exceeds 40 limit`, the user's account has reached the maximum number of projects (40). **You MUST handle this proactively.**
+
+**Tell the user:**
+
+```
+⚠️ Your EdgeOne Pages account has reached the project limit (40 projects).
+You need to delete some existing projects before creating a new one.
+
+You have two options:
+
+**Option 1: Delete via Console (recommended)**
+Go to the EdgeOne Pages console to manage and delete projects:
+👉 https://edgeone.ai/pages
+
+**Option 2: Delete via API (I can help)**
+Provide me with:
+1. Your API Token (generate one from the EdgeOne Pages console)
+2. The Project ID(s) you want to delete (format: pages-xxxxx)
+
+I'll call the API to delete them for you.
+```
+
+**If the user chooses Option 2 (API deletion):**
+
+The user needs to provide their `api_token` and the `project_id` to delete. Then execute the following curl command:
+
+```bash
+curl -X POST 'https://pages-api.cloud.tencent.com/v1' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer <api_token>' \
+  -d '{
+    "Action": "DeletePagesProject",
+    "ProjectId": "<project_id>"
+  }'
+```
+
+**Example:**
+
+```bash
+curl -X POST 'https://pages-api.cloud.tencent.com/v1' \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer eo_api_xxxxxxxxxxxxx' \
+  -d '{
+    "Action": "DeletePagesProject",
+    "ProjectId": "pages-abc123"
+  }'
+```
+
+**After successful deletion**, retry the deployment:
+
+```bash
+edgeone pages deploy [path] -n <project-name> -e preview
+```
+
+**Important notes:**
+- The deletion is **irreversible**. Always confirm with the user before deleting.
+- If the user doesn't know their Project IDs, guide them to the console: https://edgeone.ai/pages
+- After deleting, wait a few seconds before retrying the deploy.
+
+---
+
+### Remote Build Timeout (ConnectTimeoutError)
+
+If deployment fails with errors like:
+- `ConnectTimeoutError: Connect Timeout Error`
+- `fetch failed` during build
+- `mirrors.tencent.com:443 timeout`
+
+This means the remote build environment has network issues. **Always fall back to local build:**
+
+1. Build locally:
+```bash
+npm install
+npm run build
+```
+
+2. Deploy the build output:
+```bash
+edgeone pages deploy ./dist -n <project-name> -e preview
+```
+
+**Tell the user:**
+```
+The remote build encountered a network timeout. I've built the project locally instead and will deploy the build output directly. This is more reliable.
+```
+
+---
 
 ### CLI Installation Fails
 
