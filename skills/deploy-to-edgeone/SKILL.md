@@ -8,13 +8,21 @@ metadata:
 
 # Deploy to EdgeOne Pages
 
+> **🚨 TOP-LEVEL RULES (MUST FOLLOW — VIOLATIONS CAUSE USER-FACING ERRORS):**
+>
+> 1. **DEPLOY FLOW:** Run `edgeone pages deploy` **without any build output path** (no `.next`, `dist`, `build`). Do NOT run `npm run build` or check for build artifacts. The CLI handles building automatically. Only use `edgeone pages build` → `edgeone pages deploy .edgeone` as a fallback if the first deploy fails.
+>
+> 2. **FULL URL:** After deploy, the CLI outputs `EDGEONE_DEPLOY_URL=https://xxx.edgeone.cool?eo_token=xxx&eo_time=xxx`. You **MUST** show the **complete URL including `?eo_token=...&eo_time=...`**. If you truncate it, the user gets a 403 error.
+>
+> 3. **EXPIRATION:** Always warn that preview URLs expire in **3 hours**, and suggest binding a **custom domain** for a permanent URL.
+
 Deploy any project to EdgeOne Pages. **Always deploy as preview** (not production) unless the user explicitly asks for production.
 
 The goal is to get the user into the best long-term setup: their project linked to EdgeOne Pages with easy CLI deploys. Every method below tries to move the user closer to that state.
 
 ## Step 1: Gather Project State
 
-Run all checks before deciding which method to use:
+Run these checks before deciding which method to use:
 
 ```bash
 # 1. Check if EdgeOne CLI is installed
@@ -22,16 +30,10 @@ command -v edgeone 2>/dev/null && edgeone -v
 
 # 2. Check if authenticated
 edgeone whoami 2>/dev/null
-
-# 3. Check for a git remote
-git remote get-url origin 2>/dev/null
-
-# 4. Check if project has a build output directory (common ones)
-ls -d dist build out .next .output public 2>/dev/null
-
-# 5. Check if package.json exists and has a build script
-cat package.json 2>/dev/null | grep -A1 '"build"'
 ```
+
+> **⚠️ DO NOT** check for build output directories (dist, .next, etc.) or run `npm run build` at this stage.
+> The EdgeOne CLI handles building automatically. Go directly to Step 3 for deployment.
 
 ## Step 2: Choose a Deploy Method
 
@@ -41,27 +43,26 @@ Based on the checks above, follow the appropriate path:
 
 ### Path A: CLI installed + authenticated → Deploy directly
 
-This is the ideal state. The CLI is ready to go.
+This is the ideal state. The CLI is ready to go. **Go directly to Step 3.**
+
+> **⚠️ IMPORTANT: Do NOT manually build the project or look for existing build output.**
+> Do NOT run `npm run build` or check for `.next`, `dist`, `build` directories.
+> The `edgeone pages deploy` command handles building automatically.
+> Just run `edgeone pages deploy` without specifying a build output path — the CLI knows what to do.
 
 **Preview deployment (default):**
 
 ```bash
-edgeone pages deploy [path] -e preview
+edgeone pages deploy -n <project-name> -e preview
 ```
 
 **Production deployment (only if user explicitly asks):**
 
 ```bash
-edgeone pages deploy [path]
+edgeone pages deploy -n <project-name>
 ```
 
 > **Note:** EdgeOne Pages defaults to `production` environment. Always pass `-e preview` unless the user explicitly wants production.
-
-**With a project name (to target a specific project):**
-
-```bash
-edgeone pages deploy [path] -n <project-name> -e preview
-```
 
 If the project hasn't been deployed to EdgeOne Pages before, the CLI will automatically create a new project.
 
@@ -157,15 +158,26 @@ To get an API Token:
 
 ## Step 3: Deploy (with automatic fallback to local build)
 
+> **🚨 MANDATORY FLOW — DO NOT SKIP OR REORDER:**
+> 1. Run `edgeone pages deploy` **WITHOUT specifying a build output path** (no `.next`, no `dist`, no `build`, no `out`)
+> 2. **ONLY IF** step 1 fails with timeout/network error → run `edgeone pages build` → then `edgeone pages deploy .edgeone`
+>
+> **NEVER** run `npm run build`, `ls -d .next`, or check for existing build artifacts.
+> **NEVER** pass a build output directory (like `.next` or `dist`) to `edgeone pages deploy` on the first attempt.
+> Let the EdgeOne CLI handle the build process automatically.
+
 The correct deployment flow is: **try direct deploy first** → if it fails (timeout/network error) → **build locally with `edgeone pages build`** → **deploy the `.edgeone` output**.
 
-### 3.1 First attempt: Direct deploy
+### 3.1 First attempt: Direct deploy (NO build path)
 
-Always try `edgeone pages deploy` first. The CLI will attempt to build remotely and deploy:
+Always try `edgeone pages deploy` **without a path** first. The CLI will detect the framework, build remotely, and deploy:
 
 ```bash
+cd <project-directory>
 edgeone pages deploy -n <project-name> -e preview
 ```
+
+**Do NOT** add a build output path like `.next` or `dist`. Just `edgeone pages deploy`.
 
 If this succeeds, you're done! Show the deployment result.
 
@@ -190,15 +202,16 @@ edgeone pages deploy .edgeone -n <project-name> -e preview
 ### 3.3 Complete fallback flow example:
 
 ```bash
-# Step 1: Try direct deploy
+# Step 1: Try direct deploy (NO build path — let CLI handle everything)
+cd /path/to/project
 edgeone pages deploy -n my-project -e preview
 
-# If it fails with timeout...
+# If it fails with timeout/network error...
 
-# Step 2: Build locally
+# Step 2: Build locally using EdgeOne CLI
 edgeone pages build
 
-# Step 3: Deploy the local build output
+# Step 3: Deploy the local build output (ONLY now specify .edgeone path)
 edgeone pages deploy .edgeone -n my-project -e preview
 ```
 
@@ -227,29 +240,61 @@ This links the local project to the EdgeOne Pages project, enabling:
 
 ## Output
 
+> **🚨 READ THIS CAREFULLY — THESE RULES ARE MANDATORY FOR EVERY DEPLOYMENT OUTPUT**
+
 Always show the user the deployment URL after a successful deploy.
 
-**⚠️ CRITICAL: Use the COMPLETE deployment URL from the CLI output.** The CLI outputs a URL with `eo_token` and `eo_time` query parameters — you MUST include the full URL with these parameters. Do NOT truncate or strip the query string.
+### Rule 1: COMPLETE URL (NEVER truncate)
 
-For example, if the CLI outputs:
+**⚠️ CRITICAL: The CLI output contains `EDGEONE_DEPLOY_URL=...` — you MUST copy the ENTIRE URL including ALL query parameters (`eo_token` and `eo_time`).** 
+
+If you strip or truncate the URL, the user will get a 403 error and cannot access their site.
+
+**WRONG** ❌ (truncated — user will get 403):
 ```
-EDGEONE_DEPLOY_URL=https://my-project-xbomg82u4g.edgeone.cool?eo_token=2ca5320eff8e081f205765860fd69a35&eo_time=1773428045
+https://my-project-xbomg82u4g.edgeone.cool
 ```
 
-You must show the **full URL**: `https://my-project-xbomg82u4g.edgeone.cool?eo_token=2ca5320eff8e081f205765860fd69a35&eo_time=1773428045`
+**CORRECT** ✅ (full URL with token):
+```
+https://my-project-xbomg82u4g.edgeone.cool?eo_token=2ca5320eff8e081f205765860fd69a35&eo_time=1773428045
+```
 
-**Example output format:**
+### Rule 2: Preview URL Expiration Warning
+
+**ALWAYS** add this warning after the deployment table:
+
+```
+⏰ **Note:** The preview URL above is valid for **3 hours only**. After it expires, you'll need to redeploy to generate a new preview link.
+```
+
+### Rule 3: Custom Domain Suggestion
+
+**ALWAYS** add this tip after the expiration warning:
+
+```
+💡 **Tip:** To get a permanent URL, go to your project settings in the EdgeOne Pages console and bind a **custom domain**:
+- China site: https://console.cloud.tencent.com/edgeone/pages
+- Global site: https://console.tencentcloud.com/edgeone/pages
+```
+
+### Complete output template:
+
+Parse the CLI output for these variables:
+- `EDGEONE_DEPLOY_URL` → full preview URL (MUST include query params)
+- `EDGEONE_PROJECT_ID` → project ID
+- `EDGEONE_DEPLOY_TYPE` → deployment type
 
 ```
 🎉 Deployment successful!
 
-| Item            | Details                                                                 |
-|-----------------|-------------------------------------------------------------------------|
-| **Status**      | ✅ Ready                                                                |
-| **Preview URL** | https://<project>-<id>.edgeone.cool?eo_token=xxx&eo_time=xxx (full URL)|
-| **Env**         | Preview / Production                                                    |
-| **Project ID**  | pages-xxxxx                                                             |
-| **Console**     | https://console.cloud.tencent.com/edgeone/pages/project/<id>/deployment |
+| Item            | Details                                                                        |
+|-----------------|--------------------------------------------------------------------------------|
+| **Status**      | ✅ Ready                                                                       |
+| **Preview URL** | <FULL EDGEONE_DEPLOY_URL with ?eo_token=...&eo_time=...>                       |
+| **Env**         | Preview / Production                                                           |
+| **Project ID**  | <EDGEONE_PROJECT_ID>                                                           |
+| **Console**     | https://console.cloud.tencent.com/edgeone/pages/project/<project-id>/deployment|
 
 ⏰ **Note:** The preview URL above is valid for **3 hours only**. After it expires, you'll need to redeploy to generate a new preview link.
 
@@ -258,12 +303,11 @@ You must show the **full URL**: `https://my-project-xbomg82u4g.edgeone.cool?eo_t
 - Global site: https://console.tencentcloud.com/edgeone/pages
 ```
 
-**Important rules for the output:**
-1. **NEVER** truncate the `EDGEONE_DEPLOY_URL` — always include `?eo_token=...&eo_time=...`
-2. **ALWAYS** remind the user about the 3-hour expiration of preview URLs
-3. **ALWAYS** suggest binding a custom domain for a permanent URL
-4. Parse the CLI output for `EDGEONE_DEPLOY_URL`, `EDGEONE_PROJECT_ID`, and `EDGEONE_DEPLOY_TYPE` to populate the table
-5. **Do not** curl or fetch the deployed URL to verify it works. Just return the link.
+### Summary of mandatory output rules:
+1. **NEVER** truncate `EDGEONE_DEPLOY_URL` — always include `?eo_token=...&eo_time=...` — truncating causes 403
+2. **ALWAYS** include the 3-hour expiration warning
+3. **ALWAYS** include the custom domain suggestion
+4. **Do not** curl or fetch the deployed URL to verify it works. Just return the link.
 
 ---
 
